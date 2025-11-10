@@ -161,15 +161,18 @@ function renderCell(i: number, j: number) {
       info.rect.setStyle({ dashArray: undefined, opacity: 1.0 });
       if (info.label) info.label.getElement()?.classList.remove("muted");
     }
-    // update label HTML to reflect current value
+    // update label DOM to reflect current value (safer than innerHTML)
     if (info.label) {
       const el = info.label.getElement();
       if (el) {
-        if (info.value === null) {
-          el.innerHTML = `<div class="cell-label empty"></div>`;
-        } else {
-          el.innerHTML = `<div class="cell-label token">${info.value}</div>`;
-        }
+        // clear previous children
+        while (el.firstChild) el.removeChild(el.firstChild);
+        const child = document.createElement("div");
+        child.className = info.value === null
+          ? "cell-label empty"
+          : "cell-label token";
+        if (info.value !== null) child.textContent = String(info.value);
+        el.appendChild(child);
       }
     }
   }
@@ -311,7 +314,7 @@ function getCurrentPositionPromise(
 // Expose some helpers to window for debugging in the browser console
 // (handy for testing; can be removed later)
 declare global {
-  var cellMap: Map<string, unknown> | undefined;
+  var cellMap: Map<string, CellInfo> | undefined;
   var heldToken: number | null | undefined;
   var pick: ((i: number, j: number) => number | null) | undefined;
 }
@@ -325,10 +328,15 @@ globalThis.pick = (i: number, j: number) => {
   if (heldToken === null && c.value !== null && canInteract(i, j)) {
     heldToken = c.value;
     c.value = null;
-    // update label immediately
+    // update label immediately (safer DOM manipulation)
     if (c.label) {
       const el = c.label.getElement();
-      if (el) el.innerHTML = `<div class="cell-label empty"></div>`;
+      if (el) {
+        while (el.firstChild) el.removeChild(el.firstChild);
+        const child = document.createElement("div");
+        child.className = "cell-label empty";
+        el.appendChild(child);
+      }
     }
     updateStatusPanel();
     return heldToken;
