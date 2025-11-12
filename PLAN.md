@@ -16,7 +16,7 @@
 
 Key technical challenge: Can you assemble a map-based user interface using the Leaflet mapping framework?
 
-### Steps
+### D3.a: Steps
 
 - [x] create a basic leaflet map on screen
 - [x] add the player's current location via browser geolocation (with a classroom fallback)
@@ -33,3 +33,18 @@ Key technical challenge: Can you assemble a map-based user interface using the L
 - [x] notify the player when they hold a sufficiently high-value token (e.g. 8)
 - [x] render enough cells (render radius) so the map visually appears filled to the viewport edges
 - [x] keep token spawning consistent across page loads via deterministic hashing seeds
+
+## D3.b: Globe-spanning gameplay
+
+Key technical challenge: Can I add a movement mechanic on the Leaflet map while maintaining much of the original code?
+
+### D3.b: Steps
+
+- [x] Assign the player character as the location marker
+- [x] Save the original location of the player once and do not update the location again based on actual current location (This is so the player can move around without the game constantly sending them back to their starting point)
+- [x] Add function that moves player character when player scrolls around on the map (player character stays in the center of the screen)
+- [x] Make only the cells near the player character interactable (within a 3 cell raidus)
+- [x] Make cells out of view memoryless: cells with tokens previously collected by player can hold tokens again when out of view
+- [x] Add a token that is a value higher than the previous highest token (32 perhaps) that players need to craft up t\
+- [x] Add a victory screen for when players reach the new token max
+- [x] Add a restart button on the victory screen that starts a new game from the beginning
