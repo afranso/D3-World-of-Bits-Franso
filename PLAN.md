@@ -45,6 +45,19 @@ Key technical challenge: Can I add a movement mechanic on the Leaflet map while 
 - [x] Add function that moves player character when player scrolls around on the map (player character stays in the center of the screen)
 - [x] Make only the cells near the player character interactable (within a 3 cell raidus)
 - [x] Make cells out of view memoryless: cells with tokens previously collected by player can hold tokens again when out of view
-- [x] Add a token that is a value higher than the previous highest token (32 perhaps) that players need to craft up t\
+- [x] Add a token that is a value higher than the previous highest token (32 perhaps) that players need to craft up to
 - [x] Add a victory screen for when players reach the new token max
 - [x] Add a restart button on the victory screen that starts a new game from the beginning
+
+## D3.c: Object Persistence
+
+Key technical challenge: Can I give modified cells memory so that they can save their state even when off screen?
+
+### D3.c: Steps
+
+- [x] Apply the Flyweight pattern so off-screen cells use no memory unless modified
+- [x] Use the Memento (or similar) pattern to save modified cell states when they scroll off-screen
+- [x] Restore saved cell states when they come back into view
+- [x] Make the map appear to remember cell states even when cells are not visible
+- [x] Store cell data separately from coordinates so a Map can track modified cells
+- [x] Rebuild the visible map from scratch whenever the view changes instead of moving existing objects
