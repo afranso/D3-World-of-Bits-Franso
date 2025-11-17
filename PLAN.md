@@ -61,3 +61,16 @@ Key technical challenge: Can I give modified cells memory so that they can save 
 - [x] Make the map appear to remember cell states even when cells are not visible
 - [x] Store cell data separately from coordinates so a Map can track modified cells
 - [x] Rebuild the visible map from scratch whenever the view changes instead of moving existing objects
+
+## D3.d: Gameplay Across Real-world Space and Time
+
+Key technical challenge: How can I add geolocation to my game and keep keyboard movement at the same time? How can I save the state of the game across page loads?
+
+### D3.d: Steps
+
+- [x] Add geolocation movement using API to update movement
+- [x] Make geolocation movement default
+- [x] Allow user to switch between keyboard and geolocation movement using a UI change
+- [x] Hide all movement logic under movement classes
+- [x] Use local storage to save the game state across page loads
+- [x] Allow players to restart game using a button

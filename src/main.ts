@@ -46,8 +46,9 @@ const FALLBACK_LATLNG = leaflet.latLng(36.997936938057016, -122.05703507501151);
 // === Player state ===
 let PLAYER_START_LATLNG = FALLBACK_LATLNG;
 let playerLatLng = PLAYER_START_LATLNG;
-let map: leaflet.Map;
-let playerMarker: leaflet.Marker;
+// tell TypeScript these will be assigned in setupMap()
+let map!: leaflet.Map;
+let playerMarker!: leaflet.Marker;
 let playerPoints = 0;
 let heldToken: number | null = null;
 
@@ -218,7 +219,7 @@ function renderVisibleCells() {
   for (const layer of Object.values(mapWithLayers._layers)) {
     if (
       layer instanceof leaflet.Rectangle ||
-      layer instanceof leaflet.Marker && layer !== playerMarker
+      (layer instanceof leaflet.Marker && layer !== playerMarker)
     ) {
       map.removeLayer(layer);
     }
