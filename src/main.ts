@@ -5,6 +5,13 @@ import "./style.css";
 import "./_leafletWorkaround.ts";
 import _luck from "./_luck.ts";
 
+declare global {
+  // global move function for controllers
+  // (top-level declaration to satisfy TS)
+  // eslint-disable-next-line no-var
+  var __game_move: ((di: number, dj: number) => void) | undefined;
+}
+
 // === Simple UI setup ===
 const controlPanelDiv = document.createElement("div");
 controlPanelDiv.id = "controlPanel";
@@ -51,6 +58,9 @@ let map!: leaflet.Map;
 let playerMarker!: leaflet.Marker;
 let playerPoints = 0;
 let heldToken: number | null = null;
+
+// movement mode: "gps" | "buttons"
+let movementMode: "gps" | "buttons" = "gps";
 
 // === Flyweight: only modified cells are stored here ===
 const modifiedCells = new Map<string, number | null>();
@@ -107,6 +117,9 @@ function updateStatus() {
     : `Holding token: ${heldToken}`;
   statusPanelDiv.innerHTML = `${holding} — Points: ${playerPoints}`;
 
+  // movement toggle + new game button
+  ensureControlButtons();
+
   if (heldToken !== null && heldToken >= TARGET_VALUE_NOTIFY) {
     if (!document.getElementById("notify")) {
       const alert = document.createElement("div");
@@ -141,6 +154,7 @@ function getCellToken(i: number, j: number): number | null {
 // === Memento save ===
 function saveCell(i: number, j: number, value: number | null) {
   modifiedCells.set(cellKey(i, j), value);
+  saveGameState();
 }
 
 // === Render one cell ===
@@ -195,6 +209,7 @@ function renderCell(i: number, j: number) {
 
     checkVictory();
     updateStatus();
+    saveGameState();
     map.removeLayer(rect);
     map.removeLayer(label);
     renderCell(i, j);
@@ -232,48 +247,17 @@ function renderVisibleCells() {
   }
 }
 
-// === Map setup ===
-function setupMap() {
-  map = leaflet.map(mapDiv, {
-    center: PLAYER_START_LATLNG,
-    zoom: GAMEPLAY_ZOOM_LEVEL,
-    minZoom: GAMEPLAY_ZOOM_LEVEL,
-    maxZoom: GAMEPLAY_ZOOM_LEVEL,
-    zoomControl: false,
-    attributionControl: false,
-    scrollWheelZoom: true,
-  });
+// === Movement Controller Facade ===
+interface MovementController {
+  start(): void;
+  stop(): void;
+}
 
-  leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-  }).addTo(map);
+let movementController: MovementController | null = null;
 
-  playerMarker = leaflet.marker(playerLatLng, { interactive: false }).addTo(
-    map,
-  );
-
-  renderVisibleCells();
-  updateStatus();
-
-  map.on("moveend", () => {
-    playerLatLng = map.getCenter();
-    playerMarker.setLatLng(playerLatLng);
-    renderVisibleCells();
-  });
-
-  const PAN_TILES = 1;
-  function move(di: number, dj: number) {
-    map.setView(
-      [
-        map.getCenter().lat + di * TILE_DEGREES * PAN_TILES,
-        map.getCenter().lng + dj * TILE_DEGREES * PAN_TILES,
-      ],
-      GAMEPLAY_ZOOM_LEVEL,
-      { animate: false },
-    );
-  }
-
-  addEventListener("keydown", (ev) => {
+// === Button movement controller ===
+class ButtonMovementController implements MovementController {
+  private keyHandler = (ev: KeyboardEvent) => {
     if (overlay.style.display === "block") return;
     switch (ev.key) {
       case "ArrowUp":
@@ -301,8 +285,108 @@ function setupMap() {
         ev.preventDefault();
         break;
     }
+  };
+
+  start() {
+    globalThis.addEventListener("keydown", this.keyHandler);
+  }
+  stop() {
+    globalThis.removeEventListener("keydown", this.keyHandler);
+  }
+}
+
+// === Geo movement controller ===
+class GeoMovementController implements MovementController {
+  private watchId: number | null = null;
+
+  start() {
+    if (!navigator.geolocation) return;
+    this.watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        playerLatLng = leaflet.latLng(lat, lng);
+
+        // only re-center map when in GPS mode; keep dragging available
+        if (movementMode === "gps") {
+          map.setView(playerLatLng, GAMEPLAY_ZOOM_LEVEL, { animate: false });
+          playerMarker.setLatLng(playerLatLng);
+        }
+
+        renderVisibleCells();
+        saveGameState();
+      },
+      (err) => {
+        console.warn("GPS error", err);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 5000,
+      },
+    );
+  }
+
+  stop() {
+    if (this.watchId !== null) {
+      navigator.geolocation.clearWatch(this.watchId);
+      this.watchId = null;
+    }
+  }
+}
+
+// === Map setup ===
+function setupMap() {
+  map = leaflet.map(mapDiv, {
+    center: PLAYER_START_LATLNG,
+    zoom: GAMEPLAY_ZOOM_LEVEL,
+    minZoom: GAMEPLAY_ZOOM_LEVEL,
+    maxZoom: GAMEPLAY_ZOOM_LEVEL,
+    zoomControl: false,
+    attributionControl: false,
+    scrollWheelZoom: true,
   });
 
+  leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+  }).addTo(map);
+
+  playerMarker = leaflet.marker(playerLatLng, { interactive: false }).addTo(
+    map,
+  );
+
+  renderVisibleCells();
+  updateStatus();
+
+  // map dragging updates player only in button mode
+  map.on("moveend", () => {
+    if (movementMode === "buttons") {
+      playerLatLng = map.getCenter();
+      playerMarker.setLatLng(playerLatLng);
+      renderVisibleCells();
+      saveGameState();
+    } else {
+      // GPS mode: do not treat map moves as player moves
+    }
+  });
+
+  const PAN_TILES = 1;
+  function localMove(di: number, dj: number) {
+    map.setView(
+      [
+        map.getCenter().lat + di * TILE_DEGREES * PAN_TILES,
+        map.getCenter().lng + dj * TILE_DEGREES * PAN_TILES,
+      ],
+      GAMEPLAY_ZOOM_LEVEL,
+      { animate: false },
+    );
+  }
+
+  // expose move for controllers
+  globalThis.__game_move = localMove;
+
+  // attach restart button already in overlay (victory)
   document.getElementById("restartButton")?.addEventListener(
     "click",
     restartGame,
@@ -332,16 +416,96 @@ function checkVictory() {
   }
 }
 
+// === New Game / Restart ===
 function restartGame() {
   overlay.style.display = "none";
   playerPoints = 0;
   heldToken = null;
   modifiedCells.clear();
+  // reset start to current playerLatLng (so grid recenters at current spot)
+  PLAYER_START_LATLNG = playerLatLng.clone();
   map.setView(PLAYER_START_LATLNG, GAMEPLAY_ZOOM_LEVEL, { animate: false });
-  playerLatLng = PLAYER_START_LATLNG;
+  playerLatLng = PLAYER_START_LATLNG.clone();
   playerMarker.setLatLng(playerLatLng);
   renderVisibleCells();
   updateStatus();
+  saveGameState();
+}
+
+// === Control panel buttons ===
+function ensureControlButtons() {
+  // add New Game button and Movement toggle inside control panel
+  if (!document.getElementById("newGameButton")) {
+    const btn = document.createElement("button");
+    btn.id = "newGameButton";
+    btn.textContent = "New Game";
+    btn.style.marginRight = "8px";
+    btn.addEventListener("click", () => {
+      // confirm
+      if (confirm("Start a new game? This will erase saved progress.")) {
+        clearSavedState();
+        location.reload();
+      }
+    });
+    controlPanelDiv.appendChild(btn);
+  }
+
+  if (!document.getElementById("movementToggle")) {
+    const t = document.createElement("button");
+    t.id = "movementToggle";
+    t.addEventListener("click", () => {
+      toggleMovementMode();
+    });
+    controlPanelDiv.appendChild(t);
+  }
+
+  // update movement toggle label
+  const toggle = document.getElementById("movementToggle") as
+    | HTMLButtonElement
+    | null;
+  if (toggle) {
+    toggle.textContent = movementMode === "gps"
+      ? "Movement: GPS"
+      : "Movement: Keys";
+  }
+}
+
+// === Movement mode switching ===
+function setMovementMode(mode: "gps" | "buttons", persist = true) {
+  if (movementController) {
+    movementController.stop();
+    movementController = null;
+  }
+
+  movementMode = mode;
+
+  if (mode === "gps") {
+    movementController = new GeoMovementController();
+  } else {
+    movementController = new ButtonMovementController();
+  }
+
+  movementController.start();
+
+  // keys should be disabled when in gps mode (we already remove/add handlers)
+  // ensure map dragging remains available in both modes
+
+  updateStatus();
+
+  if (persist) {
+    saveGameState();
+  }
+}
+
+function toggleMovementMode() {
+  const next = movementMode === "gps" ? "buttons" : "gps";
+  setMovementMode(next);
+}
+
+// expose move function for button controller to call via global (cleaner wiring)
+function move(di: number, dj: number) {
+  const fn = globalThis.__game_move;
+  if (fn) fn(di, dj);
 }
 
 // === Geolocation start ===
@@ -355,16 +519,110 @@ function getPosition(timeout = 5000): Promise<GeolocationPosition> {
   });
 }
 
-(async () => {
+// === Persistence (localStorage) ===
+const STORAGE_KEY = "mygame_state_v1";
+
+function serializeState() {
+  // convert modifiedCells to array
+  const cells: Array<[string, number | null]> = [];
+  for (const [k, v] of modifiedCells) cells.push([k, v]);
+  return JSON.stringify({
+    PLAYER_START_LATLNG: {
+      lat: PLAYER_START_LATLNG.lat,
+      lng: PLAYER_START_LATLNG.lng,
+    },
+    playerLatLng: { lat: playerLatLng.lat, lng: playerLatLng.lng },
+    playerPoints,
+    heldToken,
+    modifiedCells: cells,
+    movementMode,
+  });
+}
+
+function saveGameState() {
   try {
-    const pos = await getPosition(7000);
-    PLAYER_START_LATLNG = leaflet.latLng(
-      pos.coords.latitude,
-      pos.coords.longitude,
-    );
-  } catch {
-    PLAYER_START_LATLNG = FALLBACK_LATLNG;
+    const s = serializeState();
+    localStorage.setItem(STORAGE_KEY, s);
+  } catch (e) {
+    console.warn("Failed to save state", e);
   }
-  playerLatLng = PLAYER_START_LATLNG.clone();
+}
+
+function clearSavedState() {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+function loadGameState(): boolean {
+  try {
+    const s = localStorage.getItem(STORAGE_KEY);
+    if (!s) return false;
+    const obj = JSON.parse(s);
+
+    if (obj.PLAYER_START_LATLNG) {
+      PLAYER_START_LATLNG = leaflet.latLng(
+        obj.PLAYER_START_LATLNG.lat,
+        obj.PLAYER_START_LATLNG.lng,
+      );
+    }
+    if (obj.playerLatLng) {
+      playerLatLng = leaflet.latLng(obj.playerLatLng.lat, obj.playerLatLng.lng);
+    } else {
+      playerLatLng = PLAYER_START_LATLNG.clone();
+    }
+
+    playerPoints = typeof obj.playerPoints === "number" ? obj.playerPoints : 0;
+    heldToken = typeof obj.heldToken === "number" ? obj.heldToken : null;
+
+    modifiedCells.clear();
+    if (Array.isArray(obj.modifiedCells)) {
+      for (const [k, v] of obj.modifiedCells) {
+        modifiedCells.set(k, v);
+      }
+    }
+
+    movementMode = obj.movementMode === "buttons" ? "buttons" : "gps";
+    return true;
+  } catch (e) {
+    console.warn("Failed to load state", e);
+    return false;
+  }
+}
+
+// === Startup ===
+(async () => {
+  // attempt to restore saved game
+  const hasSaved = loadGameState();
+
+  if (!hasSaved) {
+    try {
+      const pos = await getPosition(7000);
+      PLAYER_START_LATLNG = leaflet.latLng(
+        pos.coords.latitude,
+        pos.coords.longitude,
+      );
+    } catch {
+      PLAYER_START_LATLNG = FALLBACK_LATLNG;
+    }
+    playerLatLng = PLAYER_START_LATLNG.clone();
+  } else {
+    // if saved, PLAYER_START_LATLNG and playerLatLng are already set
+  }
+
   setupMap();
+
+  // ensure control buttons present and reflect mode
+  ensureControlButtons();
+
+  // start correct movement controller
+  setMovementMode(movementMode, false);
+
+  // center map appropriately
+  map.setView(playerLatLng, GAMEPLAY_ZOOM_LEVEL, { animate: false });
+  playerMarker.setLatLng(playerLatLng);
+
+  renderVisibleCells();
+  updateStatus();
+
+  // if we restored from saved state, redraw and ensure persisted state up-to-date
+  saveGameState();
 })();
